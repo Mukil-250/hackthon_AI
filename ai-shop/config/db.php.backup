@@ -1,0 +1,36 @@
+<?php
+/**
+ * Database connection + session bootstrap.
+ * Edit the credentials below if your MySQL setup differs from XAMPP defaults.
+ */
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+mysqli_report(MYSQLI_REPORT_OFF);
+
+$dbHost = 'localhost';
+$dbUser = 'root';
+$dbPass = '';
+$dbName = 'ecommerce_db';
+
+$conn = @new mysqli($dbHost, $dbUser, $dbPass, $dbName);
+
+if ($conn->connect_errno) {
+    $msg = 'Database connection failed: ' . $conn->connect_error
+         . ' - check config/db.php, make sure MySQL is running and database.sql is imported.';
+    if (defined('API_REQUEST')) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'message' => $msg, 'items' => []]);
+        exit;
+    }
+    die($msg);
+}
+
+$conn->set_charset('utf8mb4');
+
+// Random per-visitor id used to track guest browsing for AI recommendations.
+if (empty($_SESSION['session_id'])) {
+    $_SESSION['session_id'] = bin2hex(random_bytes(32));
+}

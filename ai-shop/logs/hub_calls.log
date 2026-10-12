@@ -1,0 +1,66 @@
+[2026-10-09 01:30:24] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":4,"order_id":"ORD11","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 01:33:37] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":5,"order_id":"ORD12","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 01:38:52] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":6,"order_id":"ORD13","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 01:40:01] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":7,"order_id":"ORD14","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 01:46:34] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":8,"order_id":"ORD15","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 02:38:27] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":9,"order_id":"ORD16","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 02:59:51] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":10,"order_id":"ORD17","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 03:20:58] sendOrderToHub -> http://172.20.93.200/smarthub/api code=200
+﻿{"success":true,"duplicate":false,"hub_order_id":11,"order_id":"ORD18","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 05:30:53] sendOrderToHub -> http://172.20.93.200/smarthub/api code=0
+Connection timed out after 3011 milliseconds
+---
+[2026-10-09 05:42:30] sendOrderToHub -> http://172.20.74.181/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":13,"order_id":"ORD20","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 06:25:52] sendOrderToHub -> http://172.20.74.181/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":15,"order_id":"ORD21","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 07:04:48] sendOrderToHub -> http://172.20.74.181/smarthub/api code=0
+Operation timed out after 5012 milliseconds with 0 bytes received
+---
+[2026-10-09 07:10:30] sendOrderToHub -> http://172.20.74.181/smarthub/api code=0
+Operation timed out after 5004 milliseconds with 0 bytes received
+---
+[2026-10-09 07:15:34] sendOrderToHub -> http://172.20.74.181/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":18,"order_id":"ORD24","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 07:34:43] sendOrderToHub -> http://172.20.74.181/smarthub/api code=0
+Connection timed out after 3012 milliseconds
+---
+[2026-10-09 07:48:02] sendOrderToHub -> http://172.20.76.71/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":20,"order_id":"ORD26","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 07:50:23] sendOrderToHub -> http://172.20.76.71/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":21,"order_id":"ORD27","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 10:04:58] sendOrderToHub -> http://172.20.76.71/smarthub/api code=0
+Connection timed out after 3004 milliseconds
+---
+[2026-10-09 10:10:15] sendOrderToHub -> http://172.20.79.158/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":23,"order_id":"ORD29","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 11:29:49] sendOrderToHub -> http://172.20.79.158/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":24,"order_id":"ORD30","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 12:27:01] sendOrderToHub -> http://172.20.79.158/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":25,"order_id":"ORD31","status":"ORDER_RECEIVED"}
+---
+[2026-10-09 12:31:30] sendOrderToHub -> http://172.20.79.158/smarthub/api code=200
+{"success":true,"duplicate":false,"hub_order_id":26,"order_id":"ORD32","status":"ORDER_RECEIVED"}
+---

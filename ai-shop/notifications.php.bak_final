@@ -1,0 +1,120 @@
+<?php
+/**
+ * ai-shop — Customer Notifications
+ * File: notifications.php
+ */
+
+require_once __DIR__ . '/config/db.php';
+
+// Table auto-create (safety)
+@$conn->query("
+    CREATE TABLE IF NOT EXISTS customer_notifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL DEFAULT 1,
+        order_id VARCHAR(50),
+        title VARCHAR(200),
+        message TEXT,
+        type VARCHAR(20) DEFAULT 'info',
+        is_read TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+");
+
+if (isset($_GET['mark_read'])) {
+    $id = (int)$_GET['mark_read'];
+    $conn->query("UPDATE customer_notifications SET is_read=1 WHERE id=$id");
+    header('Location: notifications.php');
+    exit;
+}
+
+// Show ALL notifications (no user filter — shows every order's updates)
+$notifs = $conn->query("
+    SELECT * FROM customer_notifications
+    ORDER BY created_at DESC
+    LIMIT 50
+");
+
+$unread = (int)$conn->query("
+    SELECT COUNT(*) c FROM customer_notifications WHERE is_read=0
+")->fetch_assoc()['c'];
+?>
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notifications — Nova Shop</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+body { background: #f1f5f9; font-family: system-ui; padding: 24px; }
+.box { max-width: 720px; margin: 0 auto; }
+.notif { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06); border-left: 4px solid #cbd5e1; }
+.notif.unread { border-left-color: #2563eb; background: #eff6ff; }
+</style>
+</head><body>
+<div class="box">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0">
+      <i class="bi bi-bell"></i> Notifications
+      <?php if ($unread > 0): ?>
+        <span class="badge bg-danger"><?= $unread ?> new</span>
+      <?php endif; ?>
+    </h2>
+    <a href="index.php" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left"></i> Shop
+    </a>
+  </div>
+
+  <?php if ($notifs->num_rows === 0): ?>
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-bell-slash fs-1"></i>
+      <p class="mt-3">No notifications yet.</p>
+    </div>
+  <?php else: while ($n = $notifs->fetch_assoc()): ?>
+    <div class="notif <?= $n['is_read'] ? '' : 'unread' ?>">
+      <div class="d-flex justify-content-between mb-1">
+        <strong><?= htmlspecialchars($n['title']) ?></strong>
+        <?php if (!$n['is_read']): ?>
+          <span class="badge bg-primary">New</span>
+        <?php endif; ?>
+      </div>
+      <div class="text-muted small"><?= htmlspecialchars($n['message']) ?></div>
+      <div class="text-muted small mt-1">
+        <i class="bi bi-clock"></i> <?= date('d M Y, H:i', strtotime($n['created_at'])) ?>
+      </div>
+      <?php if ($n['order_id']): 
+        // Only show "Select Slot" for slot-related notifications
+        $showSlotBtn = false;
+        $titleLower = strtolower($n['title']);
+        if (strpos($titleLower, 'select') !== false || 
+            strpos($titleLower, 'waiting') !== false ||
+            strpos($titleLower, 'slot selection') !== false) {
+            $showSlotBtn = true;
+        }
+        // Hide once confirmed
+        if (strpos($titleLower, 'confirmed') !== false || 
+            strpos($titleLower, 'assigned') !== false ||
+            strpos($titleLower, 'dispatched') !== false ||
+            strpos($titleLower, 'delivery') !== false ||
+            strpos($titleLower, 'delivered') !== false) {
+            $showSlotBtn = false;
+        }
+      ?>
+        <div class="mt-2 d-flex gap-2">
+          <?php if ($showSlotBtn): ?>
+            <a href="select_slot.php?order=<?= urlencode($n['order_id']) ?>"
+               class="btn btn-primary btn-sm">
+              <i class="bi bi-calendar-check"></i> Select Delivery Slot
+            </a>
+          <?php endif; ?>
+          <a href="track.php?order=<?= urlencode($n['order_id']) ?>"
+             class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-geo-alt"></i> Track Order
+          </a>
+        </div>
+      <?php endif; ?>
+    </div>
+  <?php endwhile; endif; ?>
+</div>
+</body></html>

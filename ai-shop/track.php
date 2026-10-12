@@ -1,0 +1,60 @@
+<?php
+require_once __DIR__ . '/config/db.php';
+
+$orderRef = trim($_GET['order'] ?? '');
+if (!$orderRef) die('<h2 style="font-family:system-ui;padding:24px">Missing order ID</h2>');
+
+// Fetch from Hub
+$hubUrl = 'http://172.20.79.158/smarthub/api/orders/status.php?order_id=' . urlencode($orderRef);
+$ctx = stream_context_create(['http' => ['timeout' => 3]]);
+$raw = @file_get_contents($hubUrl, false, $ctx);
+$data = $raw ? json_decode($raw, true) : null;
+
+$status = $data['order']['status'] ?? 'UNKNOWN';
+$tracking = $data['order']['tracking_id'] ?? '';
+$rider = $data['order']['rider_name'] ?? '';
+
+$labels = [
+    'ORDER_RECEIVED' => ['Order Placed', 'We have received your order.', 'bi-cart-check', 'secondary'],
+    'PROCESSING' => ['Processing', 'Your order is being prepared.', 'bi-gear', 'secondary'],
+    'PARCEL_READY' => ['Packed', 'Ready for pickup.', 'bi-box-seam', 'secondary'],
+    'REACHED_HUB' => ['At Hub', 'At the hub.', 'bi-building', 'primary'],
+    'WAITING_FOR_SLOT' => ['Select Slot', 'Please pick your delivery time.', 'bi-calendar-week', 'warning'],
+    'SLOT_CONFIRMED' => ['Slot Confirmed', 'Delivery scheduled.', 'bi-calendar-check', 'success'],
+    'READY_FOR_DISPATCH' => ['Ready', 'Ready to be dispatched.', 'bi-box-arrow-up', 'primary'],
+    'RIDER_ASSIGNED' => ['Rider Assigned', 'A rider has been assigned.', 'bi-person-check', 'primary'],
+    'DISPATCHED' => ['Dispatched', 'Left the hub.', 'bi-truck', 'info'],
+    'OUT_FOR_DELIVERY' => ['Out for Delivery', 'On the way!', 'bi-truck', 'info'],
+    'DELIVERED' => ['Delivered', 'Delivered successfully.', 'bi-check-circle', 'success'],
+    'DELIVERY_FAILED' => ['Failed', 'Delivery failed.', 'bi-x-circle', 'danger'],
+];
+$meta = $labels[$status] ?? [$status, 'Tracking in progress.', 'bi-info-circle', 'secondary'];
+?>
+<!DOCTYPE html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Track Order — Nova Shop</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+body { background: #f1f5f9; font-family: system-ui; padding: 24px; }
+.track-card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,.08); }
+.status-icon { width: 80px; height: 80px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 16px; }
+</style>
+</head><body>
+<div class="track-card text-center">
+  <h2 class="fw-bold mb-1">Track Your Order</h2>
+  <p class="text-muted mb-4"><?= htmlspecialchars($orderRef) ?></p>
+  <div class="status-icon bg-<?= $meta[3] ?> bg-opacity-10 text-<?= $meta[3] ?>">
+    <i class="bi <?= $meta[2] ?>"></i>
+  </div>
+  <h3 class="text-<?= $meta[3] ?>"><?= htmlspecialchars($meta[0]) ?></h3>
+  <p class="text-muted"><?= htmlspecialchars($meta[1]) ?></p>
+  <table class="table table-sm mt-4 text-start">
+    <tr><th class="text-muted">Order ID</th><td><?= htmlspecialchars($orderRef) ?></td></tr>
+    <?php if ($tracking): ?><tr><th class="text-muted">Tracking</th><td><code><?= htmlspecialchars($tracking) ?></code></td></tr><?php endif; ?>
+    <?php if ($rider): ?><tr><th class="text-muted">Rider</th><td><?= htmlspecialchars($rider) ?></td></tr><?php endif; ?>
+    <tr><th class="text-muted">Status</th><td><span class="badge bg-<?= $meta[3] ?>"><?= htmlspecialchars($status) ?></span></td></tr>
+  </table>
+  <a href="index.php" class="btn btn-outline-primary btn-sm mt-2">Back to Shop</a>
+</div>
+</body></html>

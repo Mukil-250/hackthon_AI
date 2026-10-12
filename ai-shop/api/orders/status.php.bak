@@ -1,0 +1,138 @@
+<?php
+/**
+ * ai-shop — Receives status updates FROM SlotWise Hub
+ * File: api/orders/status.php
+ */
+
+header('Content-Type: application/json');
+
+$raw = file_get_contents('php://input');
+$body = json_decode($raw, true);
+
+if (!$body) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON']);
+    exit;
+}
+
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? ($body['api_key'] ?? '');
+if ($apiKey !== 'ecom_secret_change_me_2026') {
+    http_response_code(401);
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
+
+$orderId    = $body['order_id']    ?? '';
+$status     = $body['status']      ?? '';
+$desc       = $body['description'] ?? '';
+$trackingId = $body['tracking_id'] ?? '';
+
+if (!$orderId || !$status) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Missing order_id or status']);
+    exit;
+}
+
+require_once __DIR__ . '/../../config/db.php';
+
+// Add missing columns (safety)
+@$conn->query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS hub_status VARCHAR(50) NULL");
+@$conn->query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS hub_note VARCHAR(255) NULL");
+@$conn->query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_id VARCHAR(50) NULL");
+
+// Extract numeric id from "ORD15" → 15
+$numericId = (int)preg_replace('/\D/', '', $orderId);
+
+$affected = 0;
+
+// Try matching by numeric id first
+if ($numericId > 0) {
+    $stmt = $conn->prepare("UPDATE orders SET hub_status=?, hub_note=?, tracking_id=? WHERE id=?");
+    if ($stmt) {
+        $stmt->bind_param('sssi', $status, $desc, $trackingId, $numericId);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+    }
+}
+
+// Also try order_id column if it exists
+if ($affected === 0) {
+    $colCheck = $conn->query("SHOW COLUMNS FROM orders LIKE 'order_id'");
+    if ($colCheck && $colCheck->num_rows > 0) {
+        $stmt = $conn->prepare("UPDATE orders SET hub_status=?, hub_note=?, tracking_id=? WHERE order_id=?");
+        if ($stmt) {
+            $stmt->bind_param('ssss', $status, $desc, $trackingId, $orderId);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+        }
+    }
+}
+
+// Ensure notifications table exists
+$conn->query("
+    CREATE TABLE IF NOT EXISTS customer_notifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL DEFAULT 1,
+        order_id VARCHAR(50),
+        title VARCHAR(200),
+        message TEXT,
+        type VARCHAR(20) DEFAULT 'info',
+        is_read TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+");
+
+// Map status to notification
+$notifMap = [
+    'REACHED_HUB'         => ['Parcel at Hub',        'Your parcel has reached our hub.'],
+    'WAITING_FOR_SLOT'    => ['Select Delivery Slot', 'Choose a convenient time for delivery.'],
+    'SLOT_CONFIRMED'      => ['Slot Confirmed',       'Your delivery slot is confirmed.'],
+    'RIDER_ASSIGNED'      => ['Rider Assigned',       'A rider has been assigned to your order.'],
+    'DISPATCHED'          => ['Order Dispatched',     'Your order has left the hub.'],
+    'OUT_FOR_DELIVERY'    => ['Out for Delivery',     'Your order is on the way!'],
+    'DELIVERED'           => ['Delivered',            'Your order has been delivered successfully.'],
+    'DELIVERY_FAILED'     => ['Delivery Failed',      'Please select a new delivery slot.'],
+    'RESCHEDULE_REQUIRED' => ['Reschedule Delivery',  'Please pick a new delivery slot.'],
+];
+
+$notifCreated = false;
+
+if (isset($notifMap[$status])) {
+    $title   = $notifMap[$status][0];
+    $message = $notifMap[$status][1];
+    $type = in_array($status, ['DELIVERED','SLOT_CONFIRMED']) ? 'success'
+          : (in_array($status, ['DELIVERY_FAILED','RESCHEDULE_REQUIRED']) ? 'warning' : 'info');
+
+    $stmt = $conn->prepare("
+        INSERT INTO customer_notifications (user_id, order_id, title, message, type)
+        VALUES (1, ?, ?, ?, ?)
+    ");
+    if ($stmt) {
+        $stmt->bind_param('ssss', $orderId, $title, $message, $type);
+        $stmt->execute();
+        $notifCreated = ($stmt->affected_rows > 0);
+        $stmt->close();
+    }
+}
+
+// Log
+$logDir = __DIR__ . '/../../logs';
+if (!is_dir($logDir)) @mkdir($logDir, 0777, true);
+@file_put_contents(
+    $logDir . '/hub_callback.log',
+    sprintf("[%s] order=%s status=%s updated=%d notif=%s\n",
+            date('Y-m-d H:i:s'), $orderId, $status, $affected,
+            $notifCreated ? 'yes' : 'no'),
+    FILE_APPEND | LOCK_EX
+);
+
+echo json_encode([
+    'success'       => true,
+    'order_id'      => $orderId,
+    'status'        => $status,
+    'updated'       => $affected,
+    'notification'  => $notifCreated,
+    'numeric_id'    => $numericId,
+]);

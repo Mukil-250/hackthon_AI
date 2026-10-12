@@ -1,0 +1,159 @@
+<?php
+require_once __DIR__ . '/config/db.php';
+
+$orderRef = trim($_GET['order'] ?? '');
+if (!$orderRef) die('<h2 style="font-family:system-ui;padding:24px">Missing order ID</h2>');
+
+$HUB_URL     = 'http://172.20.76.71/smarthub';
+$HUB_API_KEY = 'ecom_secret_change_me_2026';
+
+$msg = '';
+$err = '';
+$hideSlots = false;  // Set to true when already booked
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['slot_id'])) {
+    $slotId  = (int)$_POST['slot_id'];
+    $payload = json_encode(['order_id' => $orderRef, 'slot_id' => $slotId]);
+
+    $ch = curl_init($HUB_URL . '/api/slots/book.php');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'X-API-KEY: ' . $HUB_API_KEY],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 5,
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $resp = preg_replace('/^\xEF\xBB\xBF/', '', (string)$resp);
+    $resp = ltrim($resp);
+    $decoded = json_decode($resp, true);
+
+    if ($decoded && !empty($decoded['success'])) {
+        $msg = "Slot confirmed! Delivery on " . ($decoded['slot_date'] ?? '') .
+               " between " . ($decoded['slot_range'] ?? '');
+        $hideSlots = true;
+    }
+    elseif ($decoded && !empty($decoded['status']) && $decoded['status'] === 'SLOT_CONFIRMED') {
+        // Already booked
+        $msg = "This order already has a confirmed delivery slot.";
+        $hideSlots = true;
+    }
+    else {
+        $err = $decoded['error'] ?? 'Booking failed. Please try again.';
+    }
+}
+
+// Also check if order already has a booking (page load)
+if (!$msg && !$err) {
+    $ch = curl_init($HUB_URL . '/api/orders/status.php?order_id=' . urlencode($orderRef));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 5,
+    ]);
+    $ordResp = curl_exec($ch);
+    curl_close($ch);
+
+    $ordResp = preg_replace('/^\xEF\xBB\xBF/', '', (string)$ordResp);
+    $ordData = json_decode(ltrim($ordResp), true);
+
+    if ($ordData && !empty($ordData['order']['status'])) {
+        $currentStatus = $ordData['order']['status'];
+        if (in_array($currentStatus, ['SLOT_CONFIRMED','READY_FOR_DISPATCH','RIDER_ASSIGNED','DISPATCHED','OUT_FOR_DELIVERY','DELIVERED'])) {
+            $msg = "This order already has a confirmed delivery slot.";
+            $hideSlots = true;
+        }
+    }
+}
+
+// Fetch slots from Hub
+$grouped = [];
+if (!$hideSlots) {
+    $ch = curl_init($HUB_URL . '/api/slots/list.php?all=1');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 5,
+        CURLOPT_HTTPHEADER     => ['X-API-KEY: ' . $HUB_API_KEY],
+    ]);
+    $slotsResp = curl_exec($ch);
+    curl_close($ch);
+
+    $slotsResp = preg_replace('/^\xEF\xBB\xBF/', '', (string)$slotsResp);
+    $slotsResp = ltrim($slotsResp);
+    $slotsData = json_decode($slotsResp, true);
+    $grouped = $slotsData['grouped'] ?? [];
+}
+?>
+<!DOCTYPE html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Select Slot — Nova Shop</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+body { background: linear-gradient(135deg,#2563eb,#7c3aed); min-height:100vh; padding:24px; font-family:system-ui; }
+.card-main { max-width:640px; margin:0 auto; background:#fff; border-radius:16px; padding:32px; box-shadow:0 20px 60px rgba(0,0,0,.3); text-align:center; }
+.slot-btn { display:block; width:100%; text-align:left; padding:16px; border:2px solid #e2e8f0; border-radius:12px; margin-bottom:10px; background:#fff; cursor:pointer; }
+.slot-btn:hover { border-color:#2563eb; background:#eff6ff; }
+.success-icon { width: 80px; height: 80px; border-radius: 50%; background: #d1fae5; color: #059669; display: inline-flex; align-items: center; justify-content: center; font-size: 40px; margin: 0 auto 20px; }
+</style></head><body>
+<div class="card-main">
+
+  <?php if ($msg): ?>
+    <!-- Success / Already Booked View -->
+    <div class="success-icon">
+      <i class="bi bi-check-circle-fill"></i>
+    </div>
+    <h3 class="fw-bold text-success mb-2">Slot Confirmed</h3>
+    <p class="text-muted mb-4"><?= htmlspecialchars($msg) ?></p>
+
+    <div class="alert alert-success text-start small">
+      <i class="bi bi-info-circle"></i>
+      You'll receive WhatsApp / app updates as your order progresses.
+    </div>
+
+    <a href="index.php" class="btn btn-primary w-100 mb-2">
+      <i class="bi bi-house"></i> Back to Shop
+    </a>
+    <a href="orders.php" class="btn btn-outline-secondary w-100">
+      <i class="bi bi-box-seam"></i> My Orders
+    </a>
+
+  <?php else: ?>
+    <!-- Slot Selection View -->
+    <h2 class="fw-bold mb-1 text-start">Select Delivery Slot</h2>
+    <p class="text-muted mb-4 text-start">Order: <strong><?= htmlspecialchars($orderRef) ?></strong></p>
+
+    <?php if ($err): ?>
+      <div class="alert alert-danger text-start">
+        <i class="bi bi-exclamation-triangle"></i> <?= htmlspecialchars($err) ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if (empty($grouped)): ?>
+      <div class="alert alert-warning text-start">
+        <i class="bi bi-hourglass-split"></i>
+        No slots available right now. Please try again later.
+      </div>
+    <?php else: ?>
+      <form method="post" class="text-start">
+        <?php foreach ($grouped as $date => $daySlots): ?>
+          <h6 class="text-muted text-uppercase small mt-3"><?= date('l, d M', strtotime($date)) ?></h6>
+          <?php foreach ($daySlots as $s):
+            $rem = max(0, (int)$s['capacity'] - (int)$s['booked']);
+            if ($rem <= 0) continue;
+            if (($s['status'] ?? '') !== 'ACTIVE') continue;
+          ?>
+            <button type="submit" name="slot_id" value="<?= (int)$s['id'] ?>" class="slot-btn">
+              <strong><?= htmlspecialchars($s['range']) ?></strong>
+              <div class="small text-muted"><?= $rem ?> slots available</div>
+            </button>
+          <?php endforeach; ?>
+        <?php endforeach; ?>
+      </form>
+    <?php endif; ?>
+  <?php endif; ?>
+
+</div>
+</body></html>

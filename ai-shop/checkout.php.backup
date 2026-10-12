@@ -1,0 +1,516 @@
+
+<?php
+
+require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/includes/functions.php';
+
+if (!isLoggedIn()) {
+    header('Location: login.php?redirect=checkout.php');
+    exit;
+}
+
+$uid = (int) $_SESSION['user_id'];
+
+$items = getCartItems($conn);
+
+if (!$items) {
+    header('Location: cart.php?msg=empty');
+    exit;
+}
+
+$error = '';
+$address = '';
+$phone = '';
+$paymentMethod = 'cod';
+$paymentProvider = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    $address = trim((string) ($_POST['address'] ?? ''));
+    $phone = trim((string) ($_POST['phone'] ?? ''));
+
+    $paymentMethod = (string) ($_POST['payment_method'] ?? 'cod');
+    $paymentProvider = (string) ($_POST['payment_provider'] ?? '');
+
+    // Validate phone number
+    if (!preg_match('/^[0-9]{10}$/', $phone)) {
+        $error = 'Please enter a valid 10-digit phone number.';
+    }
+
+    // Validate address
+    elseif (mb_strlen($address) < 10 || mb_strlen($address) > 500) {
+        $error = 'Please enter a complete shipping address (10 to 500 characters).';
+    }
+
+    // Validate payment method
+    elseif (!in_array($paymentMethod, ['cod', 'online'], true)) {
+        $error = 'Please select a valid payment method.';
+    }
+
+    // Validate online payment provider
+    elseif (
+        $paymentMethod === 'online'
+        && !in_array($paymentProvider, ['paytm', 'gpay', 'phonepe'], true)
+    ) {
+        $error = 'Please select Paytm, Google Pay, or PhonePe.';
+    }
+
+    if ($error === '') {
+
+        mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
+        try {
+            $conn->begin_transaction();
+
+            // Read cart and current product prices/stock
+            $stmt = $conn->prepare(
+                'SELECT c.product_id, c.quantity, p.name, p.price, p.stock
+                 FROM cart c
+                 JOIN products p ON p.id = c.product_id
+                 WHERE c.user_id = ?
+                 FOR UPDATE'
+            );
+
+            $stmt->bind_param('i', $uid);
+            $stmt->execute();
+
+            $lines = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+
+            if (!$lines) {
+                throw new RuntimeException('Your cart is empty.');
+            }
+
+            // Check stock and calculate total
+            $total = 0.0;
+
+            foreach ($lines as $line) {
+                $quantity = (int) $line['quantity'];
+                $stock = (int) $line['stock'];
+
+                if ($quantity < 1 || $quantity > $stock) {
+                    throw new RuntimeException(
+                        'Not enough stock for "' . $line['name'] .
+                        '". Available: ' . $stock .
+                        '. Please update your cart.'
+                    );
+                }
+
+                $total += (float) $line['price'] * $quantity;
+            }
+
+            $total = round($total, 2);
+
+            // Save payment provider only for online selections
+            $savedProvider = ($paymentMethod === 'online')
+                ? $paymentProvider
+                : null;
+
+            // Create order with phone and payment details
+            $stmt = $conn->prepare(
+                'INSERT INTO orders
+                    (user_id, total, address, phone, payment_method, payment_provider)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+
+            $stmt->bind_param(
+                'idssss',
+                $uid,
+                $total,
+                $address,
+                $phone,
+                $paymentMethod,
+                $savedProvider
+            );
+
+            $stmt->execute();
+            $orderId = (int) $conn->insert_id;
+            $stmt->close();
+
+            // Save order items and decrease stock
+            $insItem = $conn->prepare(
+                'INSERT INTO order_items
+                    (order_id, product_id, quantity, price)
+                 VALUES (?, ?, ?, ?)'
+            );
+
+            $updStock = $conn->prepare(
+                'UPDATE products
+                 SET stock = stock - ?
+                 WHERE id = ? AND stock >= ?'
+            );
+
+            foreach ($lines as $line) {
+                $pid = (int) $line['product_id'];
+                $qty = (int) $line['quantity'];
+                $price = (float) $line['price'];
+
+                $insItem->bind_param(
+                    'iiid',
+                    $orderId,
+                    $pid,
+                    $qty,
+                    $price
+                );
+                $insItem->execute();
+
+                $updStock->bind_param('iii', $qty, $pid, $qty);
+                $updStock->execute();
+
+                if ($updStock->affected_rows !== 1) {
+                    throw new RuntimeException(
+                        'Stock changed for "' . $line['name'] .
+                        '". Please review your cart.'
+                    );
+                }
+            }
+
+            $insItem->close();
+            $updStock->close();
+
+            // Empty cart after order creation
+            $stmt = $conn->prepare(
+                'DELETE FROM cart WHERE user_id = ?'
+            );
+            $stmt->bind_param('i', $uid);
+            $stmt->execute();
+            $stmt->close();
+
+            $conn->commit();
+
+            mysqli_report(MYSQLI_REPORT_OFF);
+
+            header('Location: orders.php?success=1');
+            exit;
+
+        } catch (Throwable $e) {
+            try {
+                $conn->rollback();
+            } catch (Throwable $ignored) {
+                // Ignore rollback errors
+            }
+
+            if ($e instanceof RuntimeException) {
+                $error = $e->getMessage();
+            } else {
+                $error = 'Sorry, we could not place your order. Please try again.';
+                error_log('Checkout error: ' . $e->getMessage());
+            }
+
+            mysqli_report(MYSQLI_REPORT_OFF);
+
+            $items = getCartItems($conn);
+
+            if (!$items) {
+                header('Location: cart.php?msg=empty');
+                exit;
+            }
+        }
+    }
+}
+
+// Calculate display total
+$total = 0.0;
+
+foreach ($items as $item) {
+    $total += (float) $item['price'] * (int) $item['quantity'];
+}
+
+$pageTitle = 'Checkout - AI Shop';
+require_once __DIR__ . '/includes/header.php';
+?>
+
+<h1 class="h3 mb-3">
+    <i class="bi bi-credit-card me-2"></i>Checkout
+</h1>
+
+<?php if ($error): ?>
+    <div class="alert alert-danger">
+        <?= h($error) ?>
+        <a href="cart.php" class="alert-link">Back to cart</a>
+    </div>
+<?php endif; ?>
+
+<div class="row g-4">
+
+    <!-- Checkout form -->
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+
+                <h5 class="card-title mb-3">Shipping Details</h5>
+
+                <form method="post" action="checkout.php" id="checkoutForm">
+
+                    <!-- Phone number -->
+                    <div class="mb-3">
+                        <label for="phone" class="form-label">
+                            Phone Number
+                        </label>
+
+                        <input
+                            type="tel"
+                            name="phone"
+                            id="phone"
+                            class="form-control"
+                            placeholder="Enter your 10-digit mobile number"
+                            inputmode="numeric"
+                            pattern="[0-9]{10}"
+                            minlength="10"
+                            maxlength="10"
+                            value="<?= h($phone) ?>"
+                            required
+                        >
+                        <div class="form-text">
+                            Enter your 10-digit mobile number.
+                        </div>
+                    </div>
+
+                    <!-- Shipping address -->
+                    <div class="mb-4">
+                        <label for="address" class="form-label">
+                            Full Address with PIN Code
+                        </label>
+
+                        <textarea
+                            name="address"
+                            id="address"
+                            rows="4"
+                            class="form-control"
+                            required
+                            minlength="10"
+                            maxlength="500"
+                            placeholder="Name, house no., street, city, state, PIN"
+                        ><?= h($address) ?></textarea>
+                    </div>
+
+                    <!-- Payment methods -->
+                    <h5 class="mb-3">Payment Method</h5>
+
+                    <div class="row g-3">
+
+                        <div class="col-md-6">
+                            <input
+                                type="radio"
+                                class="btn-check"
+                                name="payment_method"
+                                id="codPayment"
+                                value="cod"
+                                <?= $paymentMethod === 'cod' ? 'checked' : '' ?>
+                                required
+                            >
+
+                            <label
+                                for="codPayment"
+                                class="btn btn-outline-success w-100 p-3"
+                            >
+                                <i class="bi bi-cash-coin fs-3"></i>
+                                <br>
+                                <strong>Cash on Delivery</strong>
+                                <br>
+                                <small>Pay when your order arrives</small>
+                            </label>
+                        </div>
+
+                        <div class="col-md-6">
+                            <input
+                                type="radio"
+                                class="btn-check"
+                                name="payment_method"
+                                id="onlinePayment"
+                                value="online"
+                                <?= $paymentMethod === 'online' ? 'checked' : '' ?>
+                            >
+
+                            <label
+                                for="onlinePayment"
+                                class="btn btn-outline-primary w-100 p-3"
+                            >
+                                <i class="bi bi-phone fs-3"></i>
+                                <br>
+                                <strong>Online Payment</strong>
+                                <br>
+                                <small>Select a payment app</small>
+                            </label>
+                        </div>
+
+                    </div>
+
+                    <!-- Online payment providers -->
+                    <div
+                        id="onlinePaymentOptions"
+                        class="mt-4 p-3 border rounded"
+                        style="<?= $paymentMethod === 'online' ? '' : 'display:none;' ?>"
+                    >
+                        <h6 class="mb-3">Choose Payment App</h6>
+
+                        <div class="row g-3">
+
+                            <div class="col-md-4">
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="payment_provider"
+                                    id="paytm"
+                                    value="paytm"
+                                    <?= $paymentProvider === 'paytm' ? 'checked' : '' ?>
+                                >
+
+                                <label
+                                    for="paytm"
+                                    class="btn btn-outline-primary w-100 p-3"
+                                >
+                                    <i class="bi bi-wallet2 fs-4"></i>
+                                    <br>Paytm
+                                </label>
+                            </div>
+
+                            <div class="col-md-4">
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="payment_provider"
+                                    id="gpay"
+                                    value="gpay"
+                                    <?= $paymentProvider === 'gpay' ? 'checked' : '' ?>
+                                >
+
+                                <label
+                                    for="gpay"
+                                    class="btn btn-outline-dark w-100 p-3"
+                                >
+                                    <i class="bi bi-google fs-4"></i>
+                                    <br>Google Pay
+                                </label>
+                            </div>
+
+                            <div class="col-md-4">
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="payment_provider"
+                                    id="phonepe"
+                                    value="phonepe"
+                                    <?= $paymentProvider === 'phonepe' ? 'checked' : '' ?>
+                                >
+
+                                <label
+                                    for="phonepe"
+                                    class="btn btn-outline-danger w-100 p-3"
+                                >
+                                    <i class="bi bi-phone fs-4"></i>
+                                    <br>PhonePe
+                                </label>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <div
+                        id="paymentInfo"
+                        class="alert alert-info mt-3"
+                        style="<?= $paymentMethod === 'online' ? '' : 'display:none;' ?>"
+                    >
+                        <i class="bi bi-info-circle me-2"></i>
+                        Demo mode: selecting an app does not charge money.
+                        Real online payments require payment gateway integration.
+                    </div>
+
+                    <button type="submit" class="btn btn-success btn-lg mt-4">
+                        <i class="bi bi-check-circle me-2"></i>
+                        Place Order
+                    </button>
+
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Order summary -->
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+
+                <h5 class="card-title">Order Summary</h5>
+
+                <?php foreach ($items as $item): ?>
+                    <div class="d-flex justify-content-between small mb-2">
+                        <span>
+                            <?= h($item['name']) ?>
+                            &times;
+                            <?= (int) $item['quantity'] ?>
+                        </span>
+
+                        <span>
+                            <?= h(
+                                fmtPrice(
+                                    (float) $item['price'] *
+                                    (int) $item['quantity']
+                                )
+                            ) ?>
+                        </span>
+                    </div>
+                <?php endforeach; ?>
+
+                <hr>
+
+                <div class="d-flex justify-content-between">
+                    <span>Shipping</span>
+                    <span class="text-success">FREE</span>
+                </div>
+
+                <div class="d-flex justify-content-between fw-bold fs-5">
+                    <span>Total</span>
+                    <span><?= h(fmtPrice($total)) ?></span>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const cod = document.getElementById('codPayment');
+    const online = document.getElementById('onlinePayment');
+    const options = document.getElementById('onlinePaymentOptions');
+    const info = document.getElementById('paymentInfo');
+    const form = document.getElementById('checkoutForm');
+
+    function updatePaymentDisplay() {
+        const isOnline = online.checked;
+
+        options.style.display = isOnline ? 'block' : 'none';
+        info.style.display = isOnline ? 'block' : 'none';
+
+        document.querySelectorAll('input[name="payment_provider"]').forEach(function (input) {
+            input.required = isOnline;
+
+            if (!isOnline) {
+                input.checked = false;
+            }
+        });
+    }
+
+    cod.addEventListener('change', updatePaymentDisplay);
+    online.addEventListener('change', updatePaymentDisplay);
+
+    form.addEventListener('submit', function (event) {
+        if (online.checked) {
+            const selectedProvider = document.querySelector(
+                'input[name="payment_provider"]:checked'
+            );
+
+            if (!selectedProvider) {
+                event.preventDefault();
+                alert('Please select Paytm, Google Pay, or PhonePe.');
+            }
+        }
+    });
+
+    updatePaymentDisplay();
+});
+</script>
+
+<?php require_once __DIR__ . '/includes/footer.php'; ?>
